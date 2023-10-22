@@ -89,7 +89,7 @@ fileprivate struct AnimatedXmark: View {
 //MARK: - Main View
 
 @available(iOS 13, macOS 11, *)
-public struct AlertToast: View{
+public struct AlertToast: View, Equatable{
     
     public enum BannerAnimation{
         case slide, pop
@@ -198,7 +198,10 @@ public struct AlertToast: View{
     
     ///Customize your alert appearance
     public var style: AlertStyle? = nil
-    
+
+    ///TapToDismiss override
+    fileprivate var tapToDismiss: Bool? = nil
+
     ///Full init
     public init(displayMode: DisplayMode = .alert,
                 type: AlertType,
@@ -268,6 +271,10 @@ public struct AlertToast: View{
             .cornerRadius(10)
             .padding([.horizontal, .bottom])
         }
+    }
+    
+    static public func ==(lhs: AlertToast, rhs: AlertToast) -> Bool {
+        return lhs.displayMode == rhs.displayMode && lhs.type == rhs.type
     }
     
     ///HUD View
@@ -407,10 +414,12 @@ public struct AlertToastModifier: ViewModifier{
     @Binding var isPresenting: Bool
     
     ///Duration time to display the alert
-    @State var duration: Double = 2
+    var duration: Double = 2
+    @State var alertDuration: Double = 2
     
     ///Tap to dismiss alert
-    @State var tapToDismiss: Bool = true
+    var tapToDismiss: Bool = true
+    @State var alertTapToDismiss: Bool = true
     
     var offsetY: CGFloat = 0
     
@@ -425,6 +434,7 @@ public struct AlertToastModifier: ViewModifier{
     
     @State private var hostRect: CGRect = .zero
     @State private var alertRect: CGRect = .zero
+    @State var alertViewId: Int = 0
     
     private var screen: CGRect {
 #if os(iOS)
@@ -441,157 +451,128 @@ public struct AlertToastModifier: ViewModifier{
     @ViewBuilder
     public func main() -> some View{
         if isPresenting{
-            
-            switch alert().displayMode{
-            case .alert:
-                alert()
-                    .onTapGesture {
-                        onTap?()
-                        if tapToDismiss{
-                            withAnimation(Animation.spring()){
-                                self.workItem?.cancel()
-                                isPresenting = false
-                                self.workItem = nil
-                            }
+            Group {
+                switch alert().displayMode{
+                    case .alert:
+                        let _ = print("=alert, displayMode=\(alert().displayMode), workItem=\(self.workItem)")
+                        ZStack {
+                            alert()
+                                .transition(AnyTransition.scale(scale: 0.8).combined(with: .opacity))
+                                .offset(y: offsetY)
                         }
-                    }
-                    .onDisappear(perform: {
-                        completion?()
-                    })
-                    .transition(AnyTransition.scale(scale: 0.8).combined(with: .opacity))
-            case .hud:
-                alert()
-                    .overlay(
+                        .frame(maxWidth: screen.width, maxHeight: screen.height, alignment: .center)
+                        .edgesIgnoringSafeArea(.all)
+                        
+                    case .hud:
+                        let _ = print("=hud, displayMode=\(alert().displayMode), workItem=\(self.workItem)")
                         GeometryReader{ geo -> AnyView in
                             let rect = geo.frame(in: .global)
                             
-                            if rect.integral != alertRect.integral{
-                                
+                            if rect.integral != hostRect.integral{
                                 DispatchQueue.main.async {
-                                    
-                                    self.alertRect = rect
+                                    self.hostRect = rect
                                 }
                             }
+                            
                             return AnyView(EmptyView())
                         }
-                    )
-                    .onTapGesture {
-                        onTap?()
-                        if tapToDismiss{
-                            withAnimation(Animation.spring()){
-                                self.workItem?.cancel()
-                                isPresenting = false
-                                self.workItem = nil
-                            }
-                        }
-                    }
-                    .onDisappear(perform: {
-                        completion?()
-                    })
-                    .transition(AnyTransition.move(edge: .top).combined(with: .opacity))
-            case .banner:
-                alert()
-                    .onTapGesture {
-                        onTap?()
-                        if tapToDismiss{
-                            withAnimation(Animation.spring()){
-                                self.workItem?.cancel()
-                                isPresenting = false
-                                self.workItem = nil
-                            }
-                        }
-                    }
-                    .onDisappear(perform: {
-                        completion?()
-                    })
-                    .transition(alert().displayMode == .banner(.slide) ? AnyTransition.slide.combined(with: .opacity) : AnyTransition.move(edge: .bottom))
-            }
-            
-        }
-    }
-    
-    @ViewBuilder
-    public func body(content: Content) -> some View {
-        switch alert().displayMode{
-        case .banner:
-            content
-                .overlay(ZStack{
-                    main()
-                        .offset(y: offsetY)
-                }
-                            .animation(Animation.spring(), value: isPresenting)
-                )
-                .valueChanged(value: isPresenting, onChange: { (presented) in
-                    if presented{
-                        onAppearAction()
-                    }
-                })
-        case .hud:
-            content
-                .overlay(
-                    GeometryReader{ geo -> AnyView in
-                        let rect = geo.frame(in: .global)
-                        
-                        if rect.integral != hostRect.integral{
-                            DispatchQueue.main.async {
-                                self.hostRect = rect
-                            }
-                        }
-                        
-                        return AnyView(EmptyView())
-                    }
                         .overlay(ZStack{
-                            main()
+                            alert()
+                                .overlay(
+                                    GeometryReader{ geo -> AnyView in
+                                        let rect = geo.frame(in: .global)
+                                        
+                                        if rect.integral != alertRect.integral{
+                                            DispatchQueue.main.async {
+                                                self.alertRect = rect
+                                            }
+                                        }
+                                        return AnyView(EmptyView())
+                                    }
+                                )
+                            
+                                .transition(AnyTransition.move(edge: .top).combined(with: .opacity))
+                                .offset(y: offsetY)
+                        })
+                        .frame(maxWidth: screen.width, maxHeight: screen.height)
+                        .offset(y: offset)
+                        
+                    case .banner:
+                        let _ = print("=banner, displayMode=\(alert().displayMode), workItem=\(self.workItem)")
+                        ZStack {
+                            alert()
                                 .offset(y: offsetY)
                         }
-                                    .frame(maxWidth: screen.width, maxHeight: screen.height)
-                                    .offset(y: offset)
-                                    .animation(Animation.spring(), value: isPresenting))
-                )
-                .valueChanged(value: isPresenting, onChange: { (presented) in
-                    if presented{
-                        onAppearAction()
-                    }
-                })
-        case .alert:
-            content
-                .overlay(ZStack{
-                    main()
-                        .offset(y: offsetY)
+                        .transition(alert().displayMode == .banner(.slide) ? AnyTransition.slide.combined(with: .opacity) : AnyTransition.move(edge: .bottom))
                 }
-                            .frame(maxWidth: screen.width, maxHeight: screen.height, alignment: .center)
-                            .edgesIgnoringSafeArea(.all)
-                            .animation(Animation.spring(), value: isPresenting))
-                .valueChanged(value: isPresenting, onChange: { (presented) in
-                    if presented{
-                        onAppearAction()
-                    }
-                })
+            }
+            .onAppear {
+                dispatchCompletionTask()
+            }
         }
-        
     }
-    
-    private func onAppearAction(){
+
+    @ViewBuilder
+    public func body(content: Content) -> some View {
+            content
+            .overlay(main())
+            .animation(.spring(), value: isPresenting)
+            .onTapGesture {
+                print(". tap")
+                if self.workItem != nil {
+                    print("  cancel task, onTapGesture")
+                }
+                isPresenting = false
+            }
+            .id(alertViewId)  // changing the view's ID instantly removes it, allowing a new alert to be created
+            .valueChanged(value: isPresenting, onChange: {presenting in
+                print("presenting changed: isPresenting=\(isPresenting)")
+                self.workItem?.cancel()
+                self.workItem = nil
+                if !presenting {
+                    print(". completionTask")
+                    completion?()
+                }
+            })
+            .valueChanged(value: alert(), onChange: {alert in
+                print("alert changed: isPresenting=\(isPresenting), type=\(alert.type), displaymode=\(alert.displayMode)")
+                print("  changing alertViewId to \(alertViewId+1)")
+                if isPresenting {  // isPresenting could be true because something else is already showing, or because a new alert has been created
+                    print(". change-driven completionTask")
+                    self.workItem?.cancel()
+                    self.workItem = nil
+                    completion?()
+                    alertViewId += 1
+                }
+            })
+    }
+
+    private func dispatchCompletionTask(){
         guard workItem == nil else {
             return
         }
         
+        print(". calling dispatch, onAppear")
+
+        // temporarily override duration and tapToDismiss function just for the .loading alert
         if alert().type == .loading{
-            duration = 0
-            tapToDismiss = false
+            alertDuration = 0
+            alertTapToDismiss = false
+        } else {
+            alertDuration = duration
+            alertTapToDismiss = tapToDismiss
         }
         
-        if duration > 0{
-            workItem?.cancel()
+        if alertDuration > 0{
+            workItem?.cancel()  // shouldn't be needed? workItem is always nil
             
             let task = DispatchWorkItem {
-                withAnimation(Animation.spring()){
-                    isPresenting = false
-                    workItem = nil
-                }
+                print(". timer task complete")
+                isPresenting = false
             }
             workItem = task
-            DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: task)
+            print(". waiting \(alertDuration) seconds")
+            DispatchQueue.main.asyncAfter(deadline: .now() + alertDuration, execute: task)
         }
     }
 }
